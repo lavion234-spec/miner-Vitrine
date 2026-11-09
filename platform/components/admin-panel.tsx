@@ -17,8 +17,9 @@ type AdminTab = 'overview' | 'products' | 'categories' | 'campaigns' | 'users' |
 type Category = { id: string; name: string; slug: string; is_active: boolean }
 type Product = { id: string; name: string; description: string; image_url: string | null; original_price: number | null; current_price: number; affiliate_url: string; category_id: string; is_featured: boolean; is_active: boolean; categories?: { name: string } | { name: string }[] | null }
 type Campaign = { id: string; name: string; slug: string; is_active: boolean }
-type Profile = { id: string; email: string | null; display_name: string; role: Role }
+type Profile = { id: string; role: Role }
 type ClickEvent = { product_id: string; clicked_at: string; campaign_id: string | null }
+type AuditEntry = { [key: string]: unknown; id?: string | number; created_at?: string; action?: string; entity_type?: string; entity_id?: string }
 type ProductForm = { name: string; description: string; original_price: string; current_price: string; affiliate_url: string; category_id: string; is_featured: boolean; is_active: boolean }
 
 const emptyProductForm: ProductForm = { name: '', description: '', original_price: '', current_price: '', affiliate_url: '', category_id: '', is_featured: false, is_active: false }
@@ -61,7 +62,7 @@ export default function AdminPanel() {
   const [profiles, setProfiles] = useState<Profile[]>([])
   const [clicks, setClicks] = useState<ClickEvent[]>([])
   const [totalClicks, setTotalClicks] = useState(0)
-  const [auditLogs, setAuditLogs] = useState<{ id: number; entity_type: string; entity_id: string; action: string; created_at: string }[]>([])
+  const [auditLogs, setAuditLogs] = useState<AuditEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [formOpen, setFormOpen] = useState(false)
   const [editingProduct, setEditingProduct] = useState<string | null>(null)
@@ -83,31 +84,56 @@ export default function AdminPanel() {
     const client = supabase
     let active = true
     let requestId = 0
+    let verifiedUserId: string | null = null
+    let pendingUserId: string | null = null
 
     async function syncAuthenticatedUser(session: Session | null) {
+      const sessionUserId = session?.user.id ?? null
+      if (!session) {
+        requestId += 1
+        verifiedUserId = null
+        pendingUserId = null
+        setUser(null)
+        setRole(null)
+        setDisplayName('')
+        setError('')
+        setAuthReady(true)
+        setLoading(false)
+        return
+      }
+      if (verifiedUserId === sessionUserId) return
+      if (pendingUserId === sessionUserId) return
+
       const currentRequest = ++requestId
+      pendingUserId = sessionUserId
       setLoading(true)
       setRole(null)
       setDisplayName('')
       setError('')
 
-      if (!session) {
+      try {
+        const { data, error: userError } = await client.auth.getUser(session.access_token)
+        if (!active || currentRequest !== requestId) return
+        if (userError || !data.user) {
+          verifiedUserId = null
+          setUser(null)
+          setError(`Não foi possível validar a sessão Supabase: ${userError?.message ?? 'usuário não encontrado'}`)
+        } else {
+          verifiedUserId = data.user.id
+          setUser((currentUser) => currentUser?.id === data.user.id ? currentUser : data.user)
+        }
+      } catch (reason) {
+        if (!active || currentRequest !== requestId) return
+        verifiedUserId = null
         setUser(null)
-        setAuthReady(true)
-        setLoading(false)
-        return
+        setError(`Não foi possível validar a sessão Supabase: ${reason instanceof Error ? reason.message : String(reason)}`)
+      } finally {
+        if (active && currentRequest === requestId) {
+          pendingUserId = null
+          setAuthReady(true)
+          setLoading(false)
+        }
       }
-
-      const { data, error: userError } = await client.auth.getUser(session.access_token)
-      if (!active || currentRequest !== requestId) return
-      if (userError || !data.user) {
-        setUser(null)
-        setError(`Não foi possível validar a sessão Supabase: ${userError?.message ?? 'usuário não encontrado'}`)
-      } else {
-        setUser(data.user)
-      }
-      setAuthReady(true)
-      setLoading(false)
     }
 
     const { data: { subscription } } = client.auth.onAuthStateChange((_event, session) => {
@@ -175,16 +201,19 @@ export default function AdminPanel() {
     if (activeRole === 'OWNER' || activeRole === 'ADMIN') {
       const [clickResult, countResult, logResult] = await Promise.all([
         supabase.from('click_events').select('product_id,clicked_at,campaign_id').gte('clicked_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()).order('clicked_at', { ascending: false }).limit(3000),
-        supabase.from('click_events').select('id', { count: 'exact', head: true }),
-        supabase.from('audit_logs').select('id,entity_type,entity_id,action,created_at').order('created_at', { ascending: false }).limit(100),
+        supabase.from('click_events').select('id', { count: 'exact' }).limit(0),
+        supabase.from('audit_logs').select('*').limit(100),
       ])
       setClicks((clickResult.data ?? []) as ClickEvent[])
       setTotalClicks(countResult.count ?? 0)
-      setAuditLogs(logResult.data ?? [])
+      setAuditLogs((logResult.data ?? []) as AuditEntry[])
+      const metricError = clickResult.error ?? countResult.error ?? logResult.error
+      if (metricError) setError(`Falha ao carregar métricas administrativas: ${metricError.message} (${metricError.code ?? 'sem código'}).`)
     }
     if (activeRole === 'OWNER') {
-      const { data } = await supabase.from('profiles').select('id,email,display_name,role').order('created_at', { ascending: false })
+      const { data, error: profilesError } = await supabase.from('profiles').select('id,role')
       setProfiles((data ?? []) as Profile[])
+      if (profilesError) setError(`Falha ao listar public.profiles: ${profilesError.message} (${profilesError.code ?? 'sem código'}).`)
     }
     setLoading(false)
   }
@@ -334,7 +363,7 @@ export default function AdminPanel() {
     if (!supabase || profile.role === 'OWNER' || profile.id === user?.id) return
     const { error: updateError } = await supabase.from('profiles').update({ role: nextRole }).eq('id', profile.id)
     if (updateError) setError(updateError.message)
-    else { setNotice(`Função de ${profile.email} atualizada.`); await loadData('OWNER') }
+    else { setNotice(`Função do perfil ${profile.id.slice(0, 8)} atualizada.`); await loadData('OWNER') }
   }
 
   const clickCounts = useMemo(() => clicks.reduce<Record<string, number>>((counts, event) => {
@@ -372,8 +401,8 @@ export default function AdminPanel() {
     <AdminTable headers={['PRODUTO', 'CATEGORIA', 'PREÇO', 'STATUS', 'DESTAQUE', 'AÇÕES']}><>{products.map((product) => <tr key={product.id}><td><strong>{product.name}</strong></td><td>{Array.isArray(product.categories) ? product.categories[0]?.name ?? '—' : product.categories?.name ?? '—'}</td><td>{formatCurrency(product.current_price)}</td><td><Badge className={product.is_active ? 'state-active' : 'state-inactive'}>{product.is_active ? 'Ativo' : 'Inativo'}</Badge></td><td>{product.is_featured ? 'Sim' : 'Não'}</td><td><div className="admin-actions"><Button variant="secondary" size="sm" onClick={() => startProduct(product)}><Pencil size={13} /> Editar</Button><Button variant="secondary" size="sm" onClick={() => void toggleProduct(product, 'is_active')}>{product.is_active ? 'Desativar' : 'Ativar'}</Button><Button variant="ghost" size="icon" disabled={role === 'EDITOR'} onClick={() => void deleteProduct(product)} title="Excluir produto" aria-label={`Excluir ${product.name}`}><Trash2 size={14} /></Button></div></td></tr>)}</></AdminTable></>}
     {tab === 'categories' && <><div className="admin-heading"><div><div className="eyebrow">ORGANIZAÇÃO</div><h1>Categorias</h1><p>Gerencie as categorias exibidas nos filtros da vitrine.</p></div></div>{(role === 'OWNER' || role === 'ADMIN') && <Card className="mb-4"><CardContent><form className="flex flex-wrap gap-2 pt-5" onSubmit={createCategory}><Input className="max-w-sm" placeholder="Nome da categoria" value={categoryName} onChange={(event) => setCategoryName(event.target.value)} minLength={2} maxLength={80} required /><Button><Plus size={14} /> Criar categoria</Button></form></CardContent></Card>}<AdminTable headers={['CATEGORIA', 'SLUG', 'STATUS', 'AÇÕES']}><>{categories.map((category) => <tr key={category.id}><td><strong>{category.name}</strong></td><td>{category.slug}</td><td><Badge className={category.is_active ? 'state-active' : 'state-inactive'}>{category.is_active ? 'Ativa' : 'Inativa'}</Badge></td><td>{(role === 'OWNER' || role === 'ADMIN') && <Button variant="secondary" size="sm" onClick={() => void setCategoryActive(category)}>{category.is_active ? 'Desativar' : 'Ativar'}</Button>}</td></tr>)}</></AdminTable></>}
     {tab === 'campaigns' && <><div className="admin-heading"><div><div className="eyebrow">ATRIBUIÇÃO DE TRÁFEGO</div><h1>Campanhas</h1><p>Use o identificador da campanha nos links de saída para comparar cliques.</p></div></div>{(role === 'OWNER' || role === 'ADMIN') && <Card className="mb-4"><CardContent><form className="flex flex-wrap gap-2 pt-5" onSubmit={createCampaign}><Input className="max-w-sm" placeholder="Nome da campanha" value={campaignName} onChange={(event) => setCampaignName(event.target.value)} minLength={2} maxLength={120} required /><Button><Plus size={14} /> Criar campanha</Button></form></CardContent></Card>}<AdminTable headers={['CAMPANHA', 'IDENTIFICADOR', 'STATUS', 'CLIQUES (30 DIAS)', 'LINK DE EXEMPLO']}><>{campaigns.map((campaign) => <tr key={campaign.id}><td><strong>{campaign.name}</strong></td><td><code>{campaign.slug}</code></td><td>{(role === 'OWNER' || role === 'ADMIN') ? <Button variant="secondary" size="sm" onClick={() => void toggleCampaign(campaign)}>{campaign.is_active ? 'Ativa' : 'Inativa'}</Button> : campaign.is_active ? 'Ativa' : 'Inativa'}</td><td>{clicks.filter((event) => event.campaign_id === campaign.id).length}</td><td><code>{`/go/?id=PRODUCT_UUID&campaign=${campaign.id}`}</code></td></tr>)}</></AdminTable></>}
-    {tab === 'users' && role === 'OWNER' && <><div className="admin-heading"><div><div className="eyebrow">CONTROLE DE ACESSO</div><h1>Usuários</h1><p>Convide ADMIN ou EDITOR. A função OWNER não pode ser atribuída por convite.</p></div></div><Card className="mb-4"><CardContent><form className="invite-form pt-5" onSubmit={inviteUser}><Field label="Email"><Input type="email" value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} required /></Field><Field label="Função"><select value={inviteRole} onChange={(event) => setInviteRole(event.target.value as 'ADMIN' | 'EDITOR')}><option value="EDITOR">EDITOR</option><option value="ADMIN">ADMIN</option></select></Field><Button><Plus size={14} /> Enviar convite</Button></form><p className="mt-3 text-xs text-muted">O envio usa uma Cloudflare Pages Function com chave service_role guardada como segredo. Em desenvolvimento local, convide usuários pelo painel Supabase.</p></CardContent></Card><AdminTable headers={['NOME', 'EMAIL', 'FUNÇÃO']}><>{profiles.map((profile) => <tr key={profile.id}><td>{profile.display_name || '—'}</td><td>{profile.email}</td><td>{profile.role === 'OWNER' || profile.id === user?.id ? <RoleBadge role={profile.role} /> : <select aria-label={`Função de ${profile.email}`} value={profile.role} onChange={(event) => void changeUserRole(profile, event.target.value as 'ADMIN' | 'EDITOR')}><option value="EDITOR">EDITOR</option><option value="ADMIN">ADMIN</option></select>}</td></tr>)}</></AdminTable></>}
-    {tab === 'audit' && (role === 'OWNER' || role === 'ADMIN') && <><div className="admin-heading"><div><div className="eyebrow">RASTREABILIDADE</div><h1>Histórico de alterações</h1><p>Eventos gerados por triggers no banco Supabase.</p></div></div><AdminTable headers={['DATA', 'ENTIDADE', 'ID', 'AÇÃO']}><>{auditLogs.map((entry) => <tr key={entry.id}><td>{new Date(entry.created_at).toLocaleString('pt-BR')}</td><td>{entry.entity_type}</td><td><code>{entry.entity_id.slice(0, 12)}</code></td><td>{entry.action}</td></tr>)}</></AdminTable></>}
+    {tab === 'users' && role === 'OWNER' && <><div className="admin-heading"><div><div className="eyebrow">CONTROLE DE ACESSO</div><h1>Usuários</h1><p>Convide ADMIN ou EDITOR. A função OWNER não pode ser atribuída por convite.</p></div></div><Card className="mb-4"><CardContent><form className="invite-form pt-5" onSubmit={inviteUser}><Field label="Email"><Input type="email" value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} required /></Field><Field label="Função"><select value={inviteRole} onChange={(event) => setInviteRole(event.target.value as 'ADMIN' | 'EDITOR')}><option value="EDITOR">EDITOR</option><option value="ADMIN">ADMIN</option></select></Field><Button><Plus size={14} /> Enviar convite</Button></form><p className="mt-3 text-xs text-muted">O envio usa uma Cloudflare Pages Function com chave service_role guardada como segredo. Em desenvolvimento local, convide usuários pelo painel Supabase.</p></CardContent></Card><AdminTable headers={['ID DO PERFIL', 'FUNÇÃO']}><>{profiles.map((profile) => <tr key={profile.id}><td><code>{profile.id}</code></td><td>{profile.role === 'OWNER' || profile.id === user?.id ? <RoleBadge role={profile.role} /> : <select aria-label={`Função do perfil ${profile.id}`} value={profile.role} onChange={(event) => void changeUserRole(profile, event.target.value as 'ADMIN' | 'EDITOR')}><option value="EDITOR">EDITOR</option><option value="ADMIN">ADMIN</option></select>}</td></tr>)}</></AdminTable></>}
+    {tab === 'audit' && (role === 'OWNER' || role === 'ADMIN') && <><div className="admin-heading"><div><div className="eyebrow">RASTREABILIDADE</div><h1>Histórico de alterações</h1><p>Eventos registrados pela tabela de auditoria do Supabase.</p></div></div><AdminTable headers={['DATA', 'ENTIDADE', 'ID', 'AÇÃO']}><>{auditLogs.map((entry, index) => <tr key={String(entry.id ?? index)}><td>{String(entry.created_at ?? entry.timestamp ?? '—')}</td><td>{String(entry.entity_type ?? entry.table_name ?? entry.table ?? '—')}</td><td><code>{String(entry.entity_id ?? entry.record_id ?? entry.id ?? '—').slice(0, 12)}</code></td><td>{String(entry.action ?? entry.operation ?? '—')}</td></tr>)}</></AdminTable></>}
     {loading && <div className="admin-loading">Atualizando dados do Supabase...</div>}
     <footer className="admin-footer"><span>GARIMPO · ADMIN</span><span>RLS ativo · {role}</span></footer>
   </div></section></div></main>

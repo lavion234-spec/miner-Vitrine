@@ -53,8 +53,6 @@ export const onRequestPost = async ({ request, env }: PagesContext) => {
 
   const { error: profileError } = await supabase.from('profiles').upsert({
     id: invitation.user.id,
-    email,
-    display_name: (payload.display_name ?? '').trim().slice(0, 100),
     role,
   })
   if (profileError) return Response.json({ error: 'Convite criado, mas a funcao nao foi atribuida. Consulte o OWNER.' }, { status: 500 })
