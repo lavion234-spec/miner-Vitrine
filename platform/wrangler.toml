@@ -1,0 +1,3 @@
+name = "affiliate-offers-platform"
+compatibility_date = "2026-11-09"
+pages_build_output_dir = "./out"
