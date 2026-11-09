@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
-import type { User } from '@supabase/supabase-js'
+import type { Session, User } from '@supabase/supabase-js'
 import Link from 'next/link'
 import { Activity, Archive, BadgeCheck, Boxes, ChartNoAxesCombined, ExternalLink, FileClock, ImagePlus, LayoutDashboard, LogOut, Megaphone, Package, Pencil, Plus, Save, ShieldCheck, Tags, Trash2, Upload, Users, X } from 'lucide-react'
 import { getSupabase, supabaseIsConfigured } from '@/lib/supabase/client'
@@ -74,18 +74,55 @@ export default function AdminPanel() {
   const [notice, setNotice] = useState('')
   const [error, setError] = useState('')
   const [authReady, setAuthReady] = useState(false)
+  const [profileRetry, setProfileRetry] = useState(0)
   const configured = supabaseIsConfigured()
   const supabase = getSupabase()
 
   useEffect(() => {
     if (!supabase) { setAuthReady(true); setLoading(false); return }
+    const client = supabase
     let active = true
-    void supabase.auth.getSession().then(({ data }) => {
-      if (active) { setUser(data.session?.user ?? null); setAuthReady(true); setLoading(false) }
+    let requestId = 0
+
+    async function syncAuthenticatedUser(session: Session | null) {
+      const currentRequest = ++requestId
+      setLoading(true)
+      setRole(null)
+      setDisplayName('')
+      setError('')
+
+      if (!session) {
+        setUser(null)
+        setAuthReady(true)
+        setLoading(false)
+        return
+      }
+
+      const { data, error: userError } = await client.auth.getUser(session.access_token)
+      if (!active || currentRequest !== requestId) return
+      if (userError || !data.user) {
+        setUser(null)
+        setError(`Não foi possível validar a sessão Supabase: ${userError?.message ?? 'usuário não encontrado'}`)
+      } else {
+        setUser(data.user)
+      }
+      setAuthReady(true)
+      setLoading(false)
+    }
+
+    const { data: { subscription } } = client.auth.onAuthStateChange((_event, session) => {
+      window.setTimeout(() => { void syncAuthenticatedUser(session) }, 0)
     })
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null)
-      if (!session) { setRole(null); setDisplayName('') }
+    void client.auth.getSession().then(({ data, error: sessionError }) => {
+      if (!active) return
+      if (sessionError) {
+        setUser(null)
+        setError(`Não foi possível restaurar a sessão Supabase: ${sessionError.message}`)
+        setAuthReady(true)
+        setLoading(false)
+        return
+      }
+      void syncAuthenticatedUser(data.session)
     })
     return () => { active = false; subscription.unsubscribe() }
   }, [supabase])
@@ -94,14 +131,29 @@ export default function AdminPanel() {
     if (!supabase || !user) { setRole(null); setLoading(false); return }
     let active = true
     setLoading(true)
-    void supabase.from('profiles').select('role,display_name').eq('id', user.id).maybeSingle().then(({ data, error: profileError }) => {
+    setRole(null)
+    setDisplayName('')
+    setError('')
+    void Promise.resolve(supabase.from('profiles').select('id,role').eq('id', user.id).maybeSingle()).then(({ data, error: profileError }) => {
       if (!active) return
-      if (profileError || !data) setError('Seu perfil não foi criado. Peça ao OWNER para verificar a configuração do Supabase.')
-      else { setRole(data.role as Role); setDisplayName(data.display_name || user.email || '') }
+      if (profileError) {
+        setError(`Falha ao ler public.profiles com id=${user.id}: ${profileError.message} (${profileError.code ?? 'sem código'}).`)
+      } else if (!data) {
+        setError(`Nenhum registro em public.profiles para id=${user.id}.`)
+      } else if (!['OWNER', 'ADMIN', 'EDITOR'].includes(data.role)) {
+        setError(`Função inválida em public.profiles.role: ${String(data.role)}.`)
+      } else {
+        setRole(data.role as Role)
+        setDisplayName(user.user_metadata?.display_name || user.email || '')
+      }
+      setLoading(false)
+    }).catch((reason: unknown) => {
+      if (!active) return
+      setError(`Falha ao consultar public.profiles com id=${user.id}: ${reason instanceof Error ? reason.message : String(reason)}`)
       setLoading(false)
     })
     return () => { active = false }
-  }, [supabase, user])
+  }, [supabase, user, profileRetry])
 
   async function loadData(activeRole: Role) {
     if (!supabase) return
@@ -302,7 +354,7 @@ export default function AdminPanel() {
   if (!configured) return <main className="auth-wrap"><section className="auth-card"><span className="brand-icon"><Boxes size={18} /></span><div className="eyebrow mt-5">CONFIGURAÇÃO SUPABASE</div><h1>Conecte seu projeto</h1><p>Defina <code>NEXT_PUBLIC_SUPABASE_URL</code> e <code>NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY</code> em <code>platform/.env.local</code>. A chave service_role nunca deve ser colocada neste arquivo.</p><div className="setup-notice">O painel permanece desativado até as variáveis públicas e a migration RLS serem configuradas.</div></section></main>
   if (!authReady || loading) return <main className="click-status"><span className="status-dot" /><p>Carregando painel seguro...</p></main>
   if (!user) return <LoginForm onLogin={login} message={notice} error={error} />
-  if (!role) return <main className="click-status"><h1>Perfil sem função</h1><p>Peça ao proprietário para revisar seu perfil no Supabase.</p><Button variant="secondary" onClick={signOut}><LogOut size={14} /> Sair</Button></main>
+  if (!role) return <main className="click-status"><h1>{error ? 'Não foi possível carregar seu perfil' : 'Perfil sem função'}</h1><p>{error || 'Seu perfil autenticado não retornou uma função válida.'}</p><div className="flex gap-2"><Button variant="secondary" onClick={() => setProfileRetry((attempt) => attempt + 1)}><Activity size={14} /> Tentar novamente</Button><Button variant="ghost" onClick={signOut}><LogOut size={14} /> Sair</Button></div></main>
 
   return <main className="admin-shell"><header className="admin-topbar"><Link className="site-brand" href="/"><span className="brand-icon"><Boxes size={17} /></span><span>garimpo<small>console de curadoria</small></span></Link><div className="flex items-center gap-3"><RoleBadge role={role} /><span className="hidden text-xs text-muted sm:inline">{displayName}</span><Button variant="ghost" size="sm" onClick={signOut}><LogOut size={14} /> Sair</Button></div></header><div className="admin-layout"><nav className="admin-sidebar" aria-label="Navegação administrativa">{visibleMenu.map((item) => <button key={item.id} className={`admin-nav-button ${tab === item.id ? 'active' : ''}`} onClick={() => { setTab(item.id); setError(''); setNotice('') }}><item.icon size={16} /><span>{item.label}</span></button>)}</nav><section className="admin-content"><div className="admin-panel">{notice && <div className="admin-message">{notice}</div>}{error && <div className="admin-message error">{error}</div>}
     {tab === 'overview' && <><div className="admin-heading"><div><div className="eyebrow">VISÃO GERAL</div><h1>Olá, {displayName.split(' ')[0]}</h1><p>Métricas reais de catálogo e cliques, sem estimar vendas ou faturamento.</p></div><Badge><Activity size={13} /> Ao vivo do Supabase</Badge></div><div className="admin-stats"><Stat label="Produtos cadastrados" value={products.length} icon={<Package size={17} />} /><Stat label="Produtos ativos" value={activeProducts} icon={<BadgeCheck size={17} />} /><Stat label="Produtos inativos" value={inactiveProducts} icon={<Archive size={17} />} /><Stat label="Cliques registrados" value={role === 'EDITOR' ? 'Restrito' : totalClicks} icon={<ExternalLink size={17} />} /></div>{role !== 'EDITOR' && <div className="admin-dashboard-grid"><Card><CardHeader><CardTitle><ChartNoAxesCombined size={17} /> Cliques nos últimos 30 dias</CardTitle></CardHeader><CardContent><div className="click-bars">{Object.entries(dailyClicks).slice(-14).map(([day, count]) => <div className="click-bar-column" key={day} title={`${day}: ${count}`}><span style={{ height: `${Math.max(4, count / maxDailyClicks * 100)}%` }} /><small>{day}</small></div>)}{Object.keys(dailyClicks).length === 0 && <p className="text-sm text-muted">Ainda não há cliques registrados.</p>}</div></CardContent></Card><Card><CardHeader><CardTitle><Package size={17} /> Mais clicados</CardTitle></CardHeader><CardContent><div className="top-click-list">{products.slice().sort((a, b) => (clickCounts[b.id] ?? 0) - (clickCounts[a.id] ?? 0)).slice(0, 5).map((product, index) => <div key={product.id}><span>{index + 1}</span><strong>{product.name}</strong><Badge>{clickCounts[product.id] ?? 0}</Badge></div>)}{products.length === 0 && <p className="text-sm text-muted">Cadastre produtos para ver o ranking.</p>}</div></CardContent></Card></div>}</>}
