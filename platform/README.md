@@ -14,7 +14,7 @@ Preencha em `.env.local` somente:
 
 ```env
 NEXT_PUBLIC_SUPABASE_URL=https://SEU_PROJETO.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=SUA_CHAVE_PUBLICA_ANON_OU_PUBLISHABLE
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=SUA_SUPABASE_PUBLISHABLE_KEY
 NEXT_PUBLIC_SITE_URL=http://localhost:3000
 ```
 
@@ -52,7 +52,7 @@ Imagens são limitadas a JPEG, PNG, WebP e AVIF, até 5 MB, com RLS no Storage. 
 - Build command: `npm run build`
 - Build output directory: `out`
 - Build variable: `NEXT_PUBLIC_SUPABASE_URL`
-- Build variable: `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- Build variable: `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
 
 Configure nas variáveis/secrets de Pages Functions:
 
@@ -60,7 +60,7 @@ Configure nas variáveis/secrets de Pages Functions:
 - `SUPABASE_SERVICE_ROLE_KEY` como secret criptografado
 - `PUBLIC_SITE_URL` com a URL final `pages.dev`
 
-Não prefixe o service role com `NEXT_PUBLIC_` e nunca o coloque no GitHub. O workflow `.github/workflows/cloudflare-pages.yml` também pode publicar usando as variáveis GitHub `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `CLOUDFLARE_ACCOUNT_ID` e o secret `CLOUDFLARE_API_TOKEN`.
+Não prefixe o service role com `NEXT_PUBLIC_` e nunca o coloque no GitHub. O workflow `.github/workflows/cloudflare-pages.yml` também pode publicar usando as variáveis GitHub `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `CLOUDFLARE_ACCOUNT_ID` e o secret `CLOUDFLARE_API_TOKEN`.
 
 ## GitHub
 

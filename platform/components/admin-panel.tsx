@@ -300,7 +300,7 @@ export default function AdminPanel() {
   const inactiveProducts = products.length - activeProducts
   const maxDailyClicks = Math.max(1, ...Object.values(dailyClicks))
 
-  if (!configured) return <main className="auth-wrap"><section className="auth-card"><span className="brand-icon"><Boxes size={18} /></span><div className="eyebrow mt-5">CONFIGURAÇÃO SUPABASE</div><h1>Conecte seu projeto</h1><p>Defina <code>NEXT_PUBLIC_SUPABASE_URL</code> e <code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code> em <code>platform/.env.local</code>. A chave service_role nunca deve ser colocada neste arquivo.</p><div className="setup-notice">O painel permanece desativado até as variáveis públicas e a migration RLS serem configuradas.</div></section></main>
+  if (!configured) return <main className="auth-wrap"><section className="auth-card"><span className="brand-icon"><Boxes size={18} /></span><div className="eyebrow mt-5">CONFIGURAÇÃO SUPABASE</div><h1>Conecte seu projeto</h1><p>Defina <code>NEXT_PUBLIC_SUPABASE_URL</code> e <code>NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY</code> em <code>platform/.env.local</code>. A chave service_role nunca deve ser colocada neste arquivo.</p><div className="setup-notice">O painel permanece desativado até as variáveis públicas e a migration RLS serem configuradas.</div></section></main>
   if (!authReady || loading) return <main className="click-status"><span className="status-dot" /><p>Carregando painel seguro...</p></main>
   if (!user) return <LoginForm onLogin={login} message={notice} error={error} />
   if (!role) return <main className="click-status"><h1>Perfil sem função</h1><p>Peça ao proprietário para revisar seu perfil no Supabase.</p><Button variant="secondary" onClick={signOut}><LogOut size={14} /> Sair</Button></main>
