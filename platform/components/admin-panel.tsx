@@ -15,7 +15,7 @@ import { Badge } from '@/components/ui/badge'
 type Role = 'OWNER' | 'ADMIN' | 'EDITOR'
 type AdminTab = 'overview' | 'products' | 'categories' | 'campaigns' | 'users' | 'audit'
 type Category = { id: string; name: string; slug: string; is_active: boolean }
-type Product = { id: string; name: string; slug: string; description: string; image_url: string | null; original_price: number | null; current_price: number; affiliate_url: string; category_id: string; is_featured: boolean; is_active: boolean; categories?: { name: string } | { name: string }[] | null }
+type Product = { id: string; name: string; description: string; image_url: string | null; original_price: number | null; current_price: number; affiliate_url: string; category_id: string; is_featured: boolean; is_active: boolean; categories?: { name: string } | { name: string }[] | null }
 type Campaign = { id: string; name: string; slug: string; is_active: boolean }
 type Profile = { id: string; email: string | null; display_name: string; role: Role }
 type ClickEvent = { product_id: string; clicked_at: string; campaign_id: string | null }
@@ -107,16 +107,16 @@ export default function AdminPanel() {
     if (!supabase) return
     setLoading(true)
     const [productResult, categoryResult, campaignResult] = await Promise.all([
-      supabase.from('products').select('id,name,slug,description,image_url,original_price,current_price,affiliate_url,category_id,is_featured,is_active,categories(name)').order('updated_at', { ascending: false }),
+      supabase.from('products').select('id,name,description,image_url,original_price,current_price,affiliate_url,category_id,is_featured,is_active,categories(name)').order('updated_at', { ascending: false }),
       supabase.from('categories').select('id,name,slug,is_active').order('name'),
-      supabase.from('campaigns').select('id,name,slug,is_active').order('created_at', { ascending: false }),
+      supabase.from('campaigns').select('id,name,is_active').order('created_at', { ascending: false }),
     ])
     if (productResult.error || categoryResult.error || campaignResult.error) {
       setError(productResult.error?.message ?? categoryResult.error?.message ?? campaignResult.error?.message ?? 'Falha ao carregar o painel.')
     } else {
       setProducts((productResult.data ?? []) as Product[])
       setCategories((categoryResult.data ?? []) as Category[])
-      setCampaigns((campaignResult.data ?? []) as Campaign[])
+      setCampaigns((campaignResult.data ?? []).map((campaign) => ({ ...campaign, slug: campaign.id.slice(0, 8) })) as Campaign[])
       setError('')
     }
 
@@ -196,7 +196,6 @@ export default function AdminPanel() {
 
     const payload = {
       name: productForm.name.trim(),
-      slug: `${slugify(productForm.name)}-${(editingProduct ?? crypto.randomUUID()).slice(0, 8)}`,
       description: productForm.description.trim(),
       image_url: imageUrl,
       original_price: originalPrice,
@@ -208,7 +207,7 @@ export default function AdminPanel() {
       created_by: user.id,
     }
     const result = editingProduct
-      ? await supabase.from('products').update({ ...payload, slug: products.find((product) => product.id === editingProduct)?.slug ?? payload.slug }).eq('id', editingProduct)
+      ? await supabase.from('products').update(payload).eq('id', editingProduct)
       : await supabase.from('products').insert(payload)
     if (result.error) { setError(result.error.message); return }
     setNotice(editingProduct ? 'Produto atualizado.' : 'Produto cadastrado.')
@@ -248,7 +247,7 @@ export default function AdminPanel() {
   async function createCampaign(event: FormEvent) {
     event.preventDefault()
     if (!supabase || !user || campaignName.trim().length < 2) return
-    const { error: insertError } = await supabase.from('campaigns').insert({ name: campaignName.trim(), slug: `${slugify(campaignName)}-${crypto.randomUUID().slice(0, 6)}`, created_by: user.id })
+    const { error: insertError } = await supabase.from('campaigns').insert({ name: campaignName.trim(), created_by: user.id })
     if (insertError) setError(insertError.message)
     else { setCampaignName(''); setNotice('Campanha criada.'); await loadData(role ?? 'ADMIN') }
   }

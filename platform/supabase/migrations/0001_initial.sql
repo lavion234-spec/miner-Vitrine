@@ -22,7 +22,7 @@ create table public.categories (
 create table public.campaigns (
   id uuid primary key default gen_random_uuid(),
   name text not null check (char_length(name) between 2 and 120),
-  slug text not null unique,
+  slug text unique,
   is_active boolean not null default true,
   created_by uuid references public.profiles(id) on delete set null,
   created_at timestamptz not null default now(),
@@ -32,7 +32,7 @@ create table public.campaigns (
 create table public.products (
   id uuid primary key default gen_random_uuid(),
   name text not null check (char_length(name) between 2 and 180),
-  slug text not null unique,
+  slug text unique,
   description text not null default '' check (char_length(description) <= 5000),
   image_url text,
   original_price numeric(10,2) check (original_price is null or original_price > 0),

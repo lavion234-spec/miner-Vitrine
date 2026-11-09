@@ -19,7 +19,7 @@ export default function ProductDetail() {
   useEffect(() => {
     const supabase = getSupabase()
     if (!supabase || !id) { setLoading(false); return }
-    void supabase.from('products').select('id,name,slug,description,image_url,original_price,current_price,affiliate_url,category_id,is_featured,categories(id,name,slug)').eq('id', id).eq('is_active', true).maybeSingle().then(({ data, error: queryError }) => {
+    void supabase.from('products').select('id,name,description,image_url,original_price,current_price,affiliate_url,category_id,is_featured,categories(id,name,slug)').eq('id', id).eq('is_active', true).maybeSingle().then(({ data, error: queryError }) => {
       if (queryError) setError(queryError.message)
       else setProduct(data as StoreProduct | null)
       setLoading(false)

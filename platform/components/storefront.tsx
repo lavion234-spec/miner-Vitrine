@@ -12,7 +12,6 @@ type Category = { id: string; name: string; slug: string }
 export type StoreProduct = {
   id: string
   name: string
-  slug: string
   description: string
   image_url: string | null
   original_price: number | null
@@ -60,7 +59,7 @@ export default function Storefront() {
     const supabase = getSupabase()
     if (!supabase) { setLoading(false); return }
     void Promise.all([
-      supabase.from('products').select('id,name,slug,description,image_url,original_price,current_price,affiliate_url,category_id,is_featured,categories(id,name,slug)').eq('is_active', true).order('is_featured', { ascending: false }).order('updated_at', { ascending: false }),
+      supabase.from('products').select('id,name,description,image_url,original_price,current_price,affiliate_url,category_id,is_featured,categories(id,name,slug)').eq('is_active', true).order('is_featured', { ascending: false }).order('updated_at', { ascending: false }),
       supabase.from('categories').select('id,name,slug').eq('is_active', true).order('name'),
     ]).then(([productResult, categoryResult]) => {
       if (productResult.error) throw productResult.error
