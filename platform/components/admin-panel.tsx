@@ -313,7 +313,7 @@ export default function AdminPanel() {
   async function createCategory(event: FormEvent) {
     event.preventDefault()
     if (!supabase || !user || categoryName.trim().length < 2) return
-    const { error: insertError } = await supabase.from('categories').insert({ name: categoryName.trim(), slug: slugify(categoryName), created_by: user.id })
+    const { error: insertError } = await supabase.from('categories').insert({ name: categoryName.trim(), slug: slugify(categoryName) })
     if (insertError) setError(insertError.message)
     else { setCategoryName(''); setNotice('Categoria criada.'); await loadData(role ?? 'EDITOR') }
   }
@@ -328,7 +328,7 @@ export default function AdminPanel() {
   async function createCampaign(event: FormEvent) {
     event.preventDefault()
     if (!supabase || !user || campaignName.trim().length < 2) return
-    const { error: insertError } = await supabase.from('campaigns').insert({ name: campaignName.trim(), created_by: user.id })
+    const { error: insertError } = await supabase.from('campaigns').insert({ name: campaignName.trim() })
     if (insertError) setError(insertError.message)
     else { setCampaignName(''); setNotice('Campanha criada.'); await loadData(role ?? 'ADMIN') }
   }
